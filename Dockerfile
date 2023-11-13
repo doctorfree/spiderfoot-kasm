@@ -1,85 +1,96 @@
-#
-# Spiderfoot Dockerfile
-#
-# http://www.spiderfoot.net
-#
-# Written by: Michael Pellon <m@pellon.io>
-# Updated by: Chandrapal <bnchandrapal@protonmail.com>
-# Updated by: Steve Micallef <steve@binarypool.com>
-# Updated by: Steve Bate <svc-spiderfoot@stevebate.net>
-#    -> Inspired by https://github.com/combro2k/dockerfiles/tree/master/alpine-spiderfoot
-#
-# Usage:
-#
-#   sudo docker build -t spiderfoot .
-#   sudo docker run -p 5001:5001 --security-opt no-new-privileges spiderfoot
-#
-# Using Docker volume for spiderfoot data
-#
-#   sudo docker run -p 5001:5001 -v /mydir/spiderfoot:/var/lib/spiderfoot spiderfoot
-#
-# Using SpiderFoot remote command line with web server
-#
-#   docker run --rm -it spiderfoot sfcli.py -s http://my.spiderfoot.host:5001/
-#
-# Running spiderfoot commands without web server (can optionally specify volume)
-#
-#   sudo docker run --rm spiderfoot sf.py -h
-#
-# Running a shell in the container for maintenance
-#   sudo docker run -it --entrypoint /bin/sh spiderfoot
-#
-# Running spiderfoot unit tests in container
-#
-#   sudo docker build -t spiderfoot-test --build-arg REQUIREMENTS=test/requirements.txt .
-#   sudo docker run --rm spiderfoot-test -m pytest --flake8 .
+FROM kasmweb/core-ubuntu-focal:1.14.0
+USER root
 
-FROM alpine:3.12.4 AS build
-ARG REQUIREMENTS=requirements.txt
-RUN apk add --no-cache gcc git curl python3 python3-dev py3-pip swig tinyxml-dev \
- python3-dev musl-dev openssl-dev libffi-dev libxslt-dev libxml2-dev jpeg-dev \
- openjpeg-dev zlib-dev cargo rust
+ENV HOME /home/kasm-default-profile
+ENV STARTUPDIR /dockerstartup
+ENV INST_SCRIPTS $STARTUPDIR/install
+WORKDIR $HOME
+
+######### Customize Container Here ###########
+
+RUN apt-get update \
+    && apt-get install -y gcc \
+    && apt-get install -y git \
+    && apt-get install -y curl \
+    && apt-get install -y python3 \
+    && apt-get install -y python3-dev \
+    && apt-get install -y python3-pip \
+    && apt-get install -y python3-venv \
+    && apt-get install -y libxml2-dev \
+    && apt-get install -y libxslt1-dev \
+    && apt-get install -y libjpeg-dev \
+    && apt-get install -y libopenjp2-7-dev \
+    && apt-get install -y zlib1g-dev \
+    && apt-get install -y libffi-dev \
+    && apt-get install -y libssl-dev \
+    && apt-get install -y cargo \
+    && apt-get install -y rustc
+
+# Set up python virtual environment
 RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin":$PATH
-COPY $REQUIREMENTS requirements.txt ./
-RUN ls
-RUN echo "$REQUIREMENTS"
-RUN pip3 install -U pip
-RUN pip3 install -r "$REQUIREMENTS"
+ENV PATH="/opt/venv/bin:$PATH"
 
 
 
-FROM alpine:3.13.0
-WORKDIR /home/spiderfoot
+RUN mkdir -p $HOME/spiderfoot
+WORKDIR $HOME/spiderfoot
+# Copy spiderfoot source code files
+COPY . .
 
-# Place database and logs outside installation directory
+
 ENV SPIDERFOOT_DATA /var/lib/spiderfoot
 ENV SPIDERFOOT_LOGS /var/lib/spiderfoot/log
 ENV SPIDERFOOT_CACHE /var/lib/spiderfoot/cache
 
-# Run everything as one command so that only one layer is created
-RUN apk --update --no-cache add python3 musl openssl libxslt tinyxml libxml2 jpeg zlib openjpeg \
-    && addgroup spiderfoot \
-    && adduser -G spiderfoot -h /home/spiderfoot -s /sbin/nologin \
-               -g "SpiderFoot User" -D spiderfoot \
-    && rm -rf /var/cache/apk/* \
-    && rm -rf /lib/apk/db \
-    && rm -rf /root/.cache \
-    && mkdir -p $SPIDERFOOT_DATA || true \
-    && mkdir -p $SPIDERFOOT_LOGS || true \
-    && mkdir -p $SPIDERFOOT_CACHE || true \
-    && chown spiderfoot:spiderfoot $SPIDERFOOT_DATA \
-    && chown spiderfoot:spiderfoot $SPIDERFOOT_LOGS \
-    && chown spiderfoot:spiderfoot $SPIDERFOOT_CACHE
+# # Create user for spiderfoot
+RUN mkdir -p $SPIDERFOOT_DATA \
+ && mkdir -p $SPIDERFOOT_LOGS \
+ && mkdir -p $SPIDERFOOT_CACHE \
+ && chown kasm-user:kasm-user $SPIDERFOOT_DATA \
+ && chown kasm-user:kasm-user $SPIDERFOOT_LOGS \
+ && chown kasm-user:kasm-user $SPIDERFOOT_CACHE
 
-COPY . .
-COPY --from=build /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
 
-USER spiderfoot
+# Install requirements.txt
+RUN pip3 install -r requirements.txt
+
 
 EXPOSE 5001
 
-# Run the application.
-ENTRYPOINT ["/opt/venv/bin/python"]
-CMD ["sf.py", "-l", "0.0.0.0:5001"]
+
+
+USER root
+# Install Firefox
+COPY ./kasm_stuff/firefox/ $INST_SCRIPTS/firefox/ 
+COPY ./kasm_stuff/firefox/firefox.desktop $HOME/Desktop/
+RUN bash $INST_SCRIPTS/firefox/install_firefox.sh && rm -rf $INST_SCRIPTS/firefox/
+
+# Update the desktop environment to be optimized for a single application
+RUN cp $HOME/.config/xfce4/xfconf/single-application-xfce-perchannel-xml/* $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/
+RUN cp /usr/share/extra/backgrounds/bg_kasm.png /usr/share/extra/backgrounds/bg_default.png
+RUN apt-get remove -y xfce4-panel
+
+# Setup the custom startup script that will be invoked when the container starts. Spiderfoot python script will also be started with this script
+ENV LAUNCH_URL  http://localhost:5001
+COPY ./kasm_stuff/firefox/custom_startup.sh $STARTUPDIR/custom_startup.sh
+RUN chmod +x $STARTUPDIR/custom_startup.sh
+
+# Install Custom Certificate Authority
+# COPY ./kasm_stuff/certificates/ $INST_SCRIPTS/certificates/
+# RUN bash $INST_SCRIPTS/certificates/install_ca_cert.sh && rm -rf $INST_SCRIPTS/certificates/
+
+ENV KASM_RESTRICTED_FILE_CHOOSER=1
+COPY ./kasm_stuff/gtk/ $INST_SCRIPTS/gtk/
+RUN bash $INST_SCRIPTS/gtk/install_restricted_file_chooser.sh
+
+
+######### End Customizations ###########
+
+RUN chown 1000:0 $HOME
+RUN $STARTUPDIR/set_user_permission.sh $HOME
+
+ENV HOME /home/kasm-user
+WORKDIR $HOME/spiderfoot
+RUN mkdir -p $HOME && chown -R 1000:0 $HOME
+
+USER 1000
