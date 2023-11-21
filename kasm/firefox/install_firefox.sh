@@ -88,7 +88,7 @@ else
   elif grep -q "ID=debian" /etc/os-release || grep -q "ID=kali" /etc/os-release || grep -q "ID=parrot" /etc/os-release; then
     echo "Firefox flash player not supported on Debian"
   elif ! grep -q Jammy /etc/os-release; then
-    # Plugin to support running flash videos for sites like vimeo 
+    # Plugin to support running flash videos for sites like vimeo
     apt-get update
     apt-get install -y browser-plugin-freshplayer-pepperflash
     apt-mark hold firefox
@@ -132,6 +132,14 @@ pref("browser.aboutwelcome.enabled", false);
 EOF
 fi
 
+# Use kasm-user's .Xauthority
+[ -f /home/kasm-user/.Xauthority ] && {
+  [ -f /root/.Xauthority && mv /root/.Xauthority /root/.Xauthority.bak
+  cp -a /home/kasm-user/.Xauthority /root/.Xauthority
+  chown root: /root/.Xauthority
+  export XAUTHORITY=/root/.Xauthority
+}
+
 if [[ "${DISTRO}" == @(centos|oracle8|rockylinux9|rockylinux8|oracle9|almalinux9|almalinux8|opensuse|fedora37|fedora38) ]]; then
   # Creating a default profile
   firefox -headless -CreateProfile "kasm $HOME/.mozilla/firefox/kasm"
@@ -153,6 +161,7 @@ else
   # Creating Default Profile
   firefox -headless -CreateProfile "kasm $HOME/.mozilla/firefox/kasm"
 fi
+[ -f /root/.Xauthority.bak && mv /root/.Xauthority.bak /root/.Xauthority
 
 if [[ "${DISTRO}" == @(centos|oracle8|rockylinux9|rockylinux8|oracle9|almalinux9|almalinux8|opensuse|fedora37|fedora38) ]]; then
   set_desktop_icon
